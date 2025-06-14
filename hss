@@ -1,0 +1,112 @@
+#!/bin/bash
+# File to store ID-to-config mappings
+HSS_CONFIG="$HOME/.hss_commands"
+touch "$HSS_CONFIG"
+
+usage() {
+    echo "Usage:"
+    echo "  hss <id>                # Execute the SSH command for <id>"
+    echo "  hss <id> -v             # View the resolved SSH command for <id>"
+    echo "  hss <id> -u <cmd>       # Set a full SSH command for <id>"
+    echo "  hss <id> -uh <host>     # Set or update host (e.g. user@host)"
+    echo "  hss <id> -up <port>     # Set or update port (e.g. 2222)"
+    echo "  hss --help              # Display this help message"
+    exit 1
+}
+
+if [ "$1" = "--help" ]; then usage; fi
+if [ -z "$1" ]; then usage; fi
+
+ID="$1"
+shift
+
+validate_port() {
+    local port="$1"
+    if ! [[ "$port" =~ ^[0-9]+$ ]] || [ "$port" -lt 1 ] || [ "$port" -gt 65535 ]; then
+        echo "Error: Port must be a number between 1 and 65535"
+        exit 1
+    fi
+}
+
+get_config() {
+    grep "^$ID:" "$HSS_CONFIG" | cut -d':' -f2- || echo ":::"
+}
+
+save_config() {
+    local new_host="$1"
+    local new_port="$2"
+    local new_full_cmd="$3"
+    grep -v "^$ID:" "$HSS_CONFIG" > "${HSS_CONFIG}.tmp" || true
+    mv "${HSS_CONFIG}.tmp" "$HSS_CONFIG"
+    echo "$ID:$new_host:$new_port:$new_full_cmd" >> "$HSS_CONFIG"
+}
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -u)
+            shift
+            full_cmd="$1"
+            save_config "" "" "$full_cmd"
+            echo "Updated full SSH command for ID '$ID': $full_cmd"
+            exit 0
+            ;;
+        -uh)
+            shift
+            new_host="$1"
+            IFS=':' read -r old_host old_port old_full_cmd <<< "$(get_config)"
+            
+            # If we have a full command, try to extract port from it
+            if [ -n "$old_full_cmd" ] && [ -z "$old_port" ]; then
+                # Extract port from full command (look for -p followed by number)
+                old_port=$(echo "$old_full_cmd" | grep -o '\-p [0-9]\+' | cut -d' ' -f2)
+            fi
+            
+            # When updating host, clear full command and use host/port mode
+            save_config "$new_host" "$old_port" ""
+            echo "Updated host for ID '$ID': $new_host"
+            exit 0
+            ;;
+        -up)
+            shift
+            new_port="$1"
+            validate_port "$new_port"
+            IFS=':' read -r old_host old_port old_full_cmd <<< "$(get_config)"
+            
+            # If we have a full command, try to extract host from it
+            if [ -n "$old_full_cmd" ] && [ -z "$old_host" ]; then
+                # Extract host from full command (last argument that's not a flag)
+                old_host=$(echo "$old_full_cmd" | awk '{print $NF}')
+            fi
+            
+            # When updating port, clear full command and use host/port mode
+            save_config "$old_host" "$new_port" ""
+            echo "Updated port for ID '$ID': $new_port"
+            exit 0
+            ;;
+        -v)
+            IFS=':' read -r host port full_cmd <<< "$(get_config)"
+            if [ -n "$full_cmd" ]; then
+                echo "$full_cmd"
+            elif [ -n "$host" ] && [ -n "$port" ]; then
+                echo "ssh -p $port $host"
+            else
+                echo "No valid configuration found for ID '$ID'"
+            fi
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            usage
+            ;;
+    esac
+done
+
+IFS=':' read -r host port full_cmd <<< "$(get_config)"
+if [ -n "$full_cmd" ]; then
+    eval "$full_cmd"
+elif [ -n "$host" ] && [ -n "$port" ]; then
+    eval "ssh -p $port $host"
+else
+    echo "Error: Incomplete configuration for ID '$ID'"
+    exit 1
+fi

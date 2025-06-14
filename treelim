@@ -1,0 +1,61 @@
+#!/bin/bash
+
+# Max number of files to show per directory
+MAX_FILES=5
+
+# Use provided directory or default to current
+ROOT_DIR="${1:-$PWD}"
+
+print_tree() {
+    local dir="$1"
+    local prefix="$2"
+
+    # Get entries
+    local entries=("$dir"/*)
+    local subdirs=()
+    local files=()
+
+    for entry in "${entries[@]}"; do
+        if [ -d "$entry" ]; then
+            subdirs+=("$entry")
+        elif [ -f "$entry" ]; then
+            files+=("$entry")
+        fi
+    done
+
+    local total_entries=$(( ${#subdirs[@]} + ( (${#files[@]} < MAX_FILES) ? ${#files[@]} : MAX_FILES ) ))
+    local count=0
+
+    # Print subdirectories
+    for subdir in "${subdirs[@]}"; do
+        count=$((count + 1))
+        local base=$(basename "$subdir")
+        if [ "$count" -eq "$total_entries" ]; then
+            echo "${prefix}└── $base"
+            print_tree "$subdir" "${prefix}    "
+        else
+            echo "${prefix}├── $base"
+            print_tree "$subdir" "${prefix}│   "
+        fi
+    done
+
+    # Print limited number of files
+    for (( i=0; i<${#files[@]} && i<MAX_FILES; i++ )); do
+        count=$((count + 1))
+        local base=$(basename "${files[i]}")
+        if [ "$count" -eq "$total_entries" ]; then
+            echo "${prefix}└── $base"
+        else
+            echo "${prefix}├── $base"
+        fi
+    done
+
+    # Show overflow message
+    if [ "${#files[@]}" -gt "$MAX_FILES" ]; then
+        echo "${prefix}│   ... (${#files[@]} more files)"
+    fi
+}
+
+# Run
+echo "$ROOT_DIR"
+print_tree "$ROOT_DIR" ""
